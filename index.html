@@ -208,8 +208,8 @@
       </div>
     </div>
 
-    <h1 class="lobby-head">Cria uma sala e manda o link.</h1>
-    <p class="lobby-sub">Vídeo, áudio e tela vão direto de um navegador pro outro. Cabem 10 pessoas.</p>
+    <h1 class="lobby-head" id="lobbyHead">Cria uma sala e manda o link.</h1>
+    <p class="lobby-sub" id="lobbySub">Vídeo, áudio e tela vão direto de um navegador pro outro. Cabem 10 pessoas.</p>
 
     <label class="field">
       <span>Seu nome</span>
@@ -227,17 +227,21 @@
       </label>
     </div>
 
-    <button class="go" id="create" type="button">Criar sala</button>
+    <div id="hostFlow">
+      <button class="go" id="create" type="button">Criar sala</button>
 
-    <div class="split">ou</div>
+      <div class="split">ou</div>
 
-    <div class="join-row">
-      <label class="field">
-        <span>Código da sala</span>
-        <input id="code" placeholder="ex: brisa-4k2p" autocomplete="off" spellcheck="false">
-      </label>
-      <button class="join-btn" id="join" type="button">Entrar</button>
+      <div class="join-row">
+        <label class="field">
+          <span>Código da sala</span>
+          <input id="code" placeholder="ex: brisa-4k2p" autocomplete="off" spellcheck="false">
+        </label>
+        <button class="join-btn" id="join" type="button">Entrar</button>
+      </div>
     </div>
+
+    <button class="go gone" id="joinDirect" type="button">Entrar na sala</button>
 
     <p class="err" id="err"></p>
     <p class="note">Precisa de HTTPS ou localhost pro navegador liberar câmera e tela.</p>
@@ -283,11 +287,18 @@
 (function(){
   "use strict";
 
-  // Se algum amigo nunca conectar (NAT simétrico, rede corporativa), a saída é
-  // um TURN: sobe um coturn e adiciona { urls:'turn:seu.host:3478', username:'x', credential:'y' }.
+  // Sem TURN, dois amigos atrás de NAT mais fechado (CGNAT, 4G, rede
+  // corporativa) simplesmente nunca conectam — aparecem no chat mas o
+  // vídeo nunca chega. O Open Relay Project (Metered) é um TURN público,
+  // sem cadastro, pra isso não travar o app. Pra algo mais sério, troca
+  // por um coturn próprio.
   var ICE = { iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
   ]};
 
   var PREFIX = 'salamk-';   // o broker público do PeerJS é global; prefixo evita colisão
@@ -500,20 +511,6 @@
     return tiers[tiers.length-1];
   }
 
-  // Chrome/Edge guardam um "colchão" extra no buffer de recepção pra
-  // absorver rede ruim. Isso custa uns 100-200ms de atraso perceptível
-  // em áudio e vídeo. Zerando o hint, o navegador ainda reajusta sozinho
-  // se a rede piorar, mas por padrão entrega o quadro assim que chega.
-  function reduceLatency(pc){
-    if (!pc || !pc.getReceivers) return;
-    pc.getReceivers().forEach(function(r){
-      try{
-        if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
-        if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
-      }catch(e){}
-    });
-  }
-
   function audioBpsFor(n, sharing){
     if (sharing) return n<=2 ? 160000 : n<=4 ? 128000 : n<=6 ? 96000 : 64000;
     return n<=4 ? 48000 : 32000;
@@ -545,7 +542,10 @@
         }
         s.setParameters(prm).catch(function(){ /* Firefox ignora parte disso */ });
       });
-      reduceLatency(pc);
+      // Não force playoutDelayHint a 0 aqui: isso trava o buffer de jitter
+      // do navegador no mínimo e ele não consegue mais absorver rede real
+      // (perda/atraso variável), o que aparece como tela cinza/quadro
+      // corrompido. O ajuste automático do Chrome já é bom o bastante.
     });
 
     var total = state.peers.size + 1;
@@ -929,6 +929,21 @@
   });
   $('#code').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('#join').click(); });
 
+  // Quem abre um link de convite já sabe o código (vem no #hash). Não faz
+  // sentido mostrar "criar sala / ou / código" pra essa pessoa — só o
+  // nome dela falta.
+  var inviteCode = location.hash.slice(1);
+  if (inviteCode){
+    $('#code').value = inviteCode;
+    $('#hostFlow').classList.add('gone');
+    $('#lobbyHead').textContent = 'Você foi chamado pra uma sala.';
+    $('#lobbySub').textContent = 'Só falta seu nome (e ajustar câmera/mic, se quiser) pra entrar.';
+    var joinDirect = $('#joinDirect');
+    joinDirect.textContent = 'Entrar na sala ' + inviteCode;
+    joinDirect.classList.remove('gone');
+    joinDirect.addEventListener('click', function(){ fail(''); start(inviteCode, false); });
+  }
+
   $('#preMic').addEventListener('click', toggleMic);
   $('#preCam').addEventListener('click', toggleCam);
   $('#btnMic').addEventListener('click', toggleMic);
@@ -1003,8 +1018,6 @@
     else { pv.classList.add('gone'); $('#previewOff').classList.remove('gone'); }
     syncButtons();
     listDevices();
-    var hash = location.hash.slice(1);
-    if (hash) $('#code').value = hash;
   }).catch(function(e){
     $('#preview').classList.add('gone');
     $('#previewOff').classList.remove('gone');
