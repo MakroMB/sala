@@ -129,6 +129,17 @@
     font-family:var(--display); font-weight:700; font-size:40px; color:var(--ink-3);
   }
 
+  .fsbtn{
+    position:absolute; top:8px; right:8px; width:30px; height:30px; border-radius:8px;
+    background:rgba(25,20,25,.72); backdrop-filter:blur(6px); color:var(--paper);
+    font-size:15px; display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity .12s linear;
+  }
+  .tile:hover .fsbtn, .tile:focus-within .fsbtn{ opacity:1 }
+  @media (hover:none){ .fsbtn{ opacity:1 } }
+  .tile:fullscreen{ border-radius:0 }
+  .tile:fullscreen video{ object-fit:contain; background:#000 }
+
   .grid.spotlight{
     display:flex; flex-direction:column; align-content:stretch;
   }
@@ -590,6 +601,7 @@
     el.innerHTML =
       '<div class="placeholder">' + (label ? esc(label.charAt(0).toUpperCase()) : '?') + '</div>' +
       '<video autoplay playsinline' + (isSelf ? ' muted' : '') + '></video>' +
+      '<button class="fsbtn" type="button" title="Tela cheia">⛶</button>' +
       '<span class="tag on"><i class="dot"></i><em class="who"></em></span>';
     el.querySelector('.who').textContent = label + (isSelf ? ' (você)' : '');
     if (state.spotlightId && state.spotlightId !== id) stripEl().appendChild(el);
@@ -611,8 +623,10 @@
     var grid = $('#grid'), strip = stripEl();
     grid.classList.add('spotlight');
     if (!strip.parentNode) grid.appendChild(strip);
-    Array.prototype.slice.call(grid.children).forEach(function(el){
-      if (el === strip) return;
+    // Precisa buscar em TODO o grid (querySelectorAll pega netos), não só
+    // grid.children: depois da primeira troca de spotlight, os tiles que
+    // não são o foco já estão dentro de #strip, um nível mais fundo.
+    Array.prototype.slice.call(grid.querySelectorAll('.tile')).forEach(function(el){
       if (el.id === 'tile-' + id){ el.classList.add('spot'); grid.insertBefore(el, grid.firstChild); }
       else { el.classList.remove('spot'); strip.appendChild(el); }
     });
@@ -988,6 +1002,21 @@
     if (e.key === 'm' || e.key === 'M') toggleMic();
     else if (e.key === 'c' || e.key === 'C') toggleCam();
     else if (e.key === 's' || e.key === 'S') share();
+  });
+
+  function toggleFullscreen(tile){
+    if (!tile) return;
+    if (document.fullscreenElement === tile) document.exitFullscreen();
+    else if (tile.requestFullscreen) tile.requestFullscreen().catch(function(){});
+  }
+  $('#grid').addEventListener('click', function(e){
+    var btn = e.target.closest && e.target.closest('.fsbtn');
+    if (btn) toggleFullscreen(btn.closest('.tile'));
+  });
+  $('#grid').addEventListener('dblclick', function(e){
+    if (e.target.closest && e.target.closest('.fsbtn')) return;
+    var tile = e.target.closest && e.target.closest('.tile');
+    if (tile) toggleFullscreen(tile);
   });
 
   $('#copyLink').addEventListener('click', function(){
