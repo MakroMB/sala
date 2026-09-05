@@ -63,6 +63,13 @@
     background:var(--ink-2); border:1px solid var(--edge); outline:none;
   }
   .field input:focus-visible{border-color:var(--live); box-shadow:0 0 0 3px rgba(127,209,174,.18)}
+  .field select{
+    width:100%; padding:12px 14px; border-radius:11px;
+    background:var(--ink-2); border:1px solid var(--edge); outline:none;
+  }
+  .field select:focus-visible{border-color:var(--live); box-shadow:0 0 0 3px rgba(127,209,174,.18)}
+  .devices{display:flex; gap:10px; margin:14px 0}
+  .devices .field{flex:1; margin:0}
 
   .go{
     width:100%; padding:14px; border-radius:11px; background:var(--live); color:#17301F;
@@ -122,6 +129,18 @@
     font-family:var(--display); font-weight:700; font-size:40px; color:var(--ink-3);
   }
 
+  .grid.spotlight{
+    display:flex; flex-direction:column; align-content:stretch;
+  }
+  .grid.spotlight .tile.spot{ flex:1; min-height:0; width:100%; aspect-ratio:auto }
+  .grid.spotlight .strip{
+    display:flex; gap:8px; flex:none; overflow-x:auto; padding-top:2px;
+  }
+  .grid.spotlight .strip .tile{ flex:none; width:170px; aspect-ratio:16/10 }
+  @media (max-width:760px){
+    .grid.spotlight .strip .tile{ width:110px }
+  }
+
   .chat{width:300px; border-left:1px solid var(--edge); display:flex; flex-direction:column; min-height:0}
   .chat-log{flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px}
   .msg{font-size:14px; word-break:break-word}
@@ -145,8 +164,18 @@
   .ctl:hover{border-color:var(--paper)}
   .ctl.off{background:var(--hot); border-color:var(--hot); color:#fff}
   .ctl.active{background:var(--live); border-color:var(--live); color:#17301F}
+  .ctl.qsel select{
+    background:transparent; border:0; color:inherit; font:inherit; cursor:pointer;
+    outline:none; appearance:none; -webkit-appearance:none; padding-right:2px;
+  }
+  .ctl.qsel select:focus-visible{outline:2px solid var(--live); outline-offset:2px}
   .ctl.leave{margin-left:18px; color:var(--hot)}
   .ctl.leave:hover{background:var(--hot); border-color:var(--hot); color:#fff}
+  .ctl.unread{position:relative}
+  .ctl.unread::after{
+    content:''; position:absolute; top:6px; right:6px; width:8px; height:8px;
+    border-radius:50%; background:var(--hot);
+  }
 
   :focus-visible{outline:2px solid var(--live); outline-offset:2px}
 
@@ -187,6 +216,17 @@
       <input id="name" maxlength="20" placeholder="Como os outros vão te ver" autocomplete="nickname">
     </label>
 
+    <div class="devices">
+      <label class="field">
+        <span>Câmera</span>
+        <select id="camSel"></select>
+      </label>
+      <label class="field">
+        <span>Microfone</span>
+        <select id="micSel"></select>
+      </label>
+    </div>
+
     <button class="go" id="create" type="button">Criar sala</button>
 
     <div class="split">ou</div>
@@ -226,6 +266,13 @@
     <button class="ctl" id="btnMic" type="button">🎙<span>Mic</span></button>
     <button class="ctl" id="btnCam" type="button">📷<span>Câmera</span></button>
     <button class="ctl" id="btnScreen" type="button">🖥<span>Tela</span></button>
+    <label class="ctl qsel" title="Qualidade do compartilhamento de tela">
+      🎚<select id="screenQ">
+        <option value="smooth">Fluido 60fps</option>
+        <option value="sharp">Nítido (texto)</option>
+        <option value="saver">Economizar dados</option>
+      </select>
+    </label>
     <button class="ctl" id="btnChat" type="button">💬<span>Chat</span></button>
     <button class="ctl leave" id="btnLeave" type="button">✕<span>Sair</span></button>
   </div>
@@ -253,12 +300,28 @@
     { upTo:6, bps: 300000, scale:2,   fps:20 },
     { upTo:99,bps: 180000, scale:3,   fps:15 }
   ];
-  var TIERS_SCREEN = [
-    { upTo:2, bps:1200000, scale:1, fps:15 },
-    { upTo:4, bps: 700000, scale:1, fps:12 },
-    { upTo:6, bps: 450000, scale:1, fps:10 },
-    { upTo:99,bps: 300000, scale:1, fps:8  }
-  ];
+  // Modos de qualidade de tela escolhidos pela galera (select #screenQ).
+  // Cada um tem seu próprio teto de banda por tier, igual TIERS_CAM.
+  var SCREEN_MODES = {
+    smooth: { hint:'motion', tiers:[
+      { upTo:2, bps:8000000, scale:1, fps:60 },
+      { upTo:4, bps:4000000, scale:1, fps:30 },
+      { upTo:6, bps:2000000, scale:1, fps:24 },
+      { upTo:99,bps:1000000, scale:1, fps:15 }
+    ]},
+    sharp: { hint:'detail', tiers:[
+      { upTo:2, bps:5000000, scale:1, fps:24 },
+      { upTo:4, bps:3000000, scale:1, fps:18 },
+      { upTo:6, bps:1800000, scale:1, fps:15 },
+      { upTo:99,bps: 900000, scale:1, fps:10 }
+    ]},
+    saver: { hint:'motion', tiers:[
+      { upTo:2, bps:1200000, scale:1, fps:24 },
+      { upTo:4, bps: 800000, scale:1, fps:18 },
+      { upTo:6, bps: 500000, scale:1, fps:15 },
+      { upTo:99,bps: 300000, scale:1, fps:10 }
+    ]}
+  };
 
   var $ = function(s){ return document.querySelector(s); };
 
@@ -267,7 +330,7 @@
     cam:null, screen:null,
     videoTrack:null,       // vídeo que está saindo (câmera ou tela)
     outAudio:null,         // trilha de áudio mixada que sai pros outros
-    micOn:true, camOn:true, sharing:false,
+    micOn:true, camOn:true, sharing:false, spotlightId:null, screenMode:'smooth',
     peers:new Map(),
     ctx:null, mixDest:null, micNode:null, micGain:null, screenNode:null,
     meters:[], rafOn:false
@@ -280,7 +343,7 @@
 
   function buildMixer(){
     var AC = window.AudioContext || window.webkitAudioContext;
-    state.ctx = new AC();
+    state.ctx = new AC({ latencyHint: 'interactive' });
     state.mixDest = state.ctx.createMediaStreamDestination();
     state.micGain = state.ctx.createGain();
     state.micGain.connect(state.mixDest);
@@ -340,6 +403,71 @@
     });
   }
 
+  function fillSelect(sel, list, label){
+    var prev = sel.value;
+    sel.innerHTML = '';
+    if (!list.length){
+      var o = document.createElement('option');
+      o.textContent = 'Nenhum dispositivo'; sel.appendChild(o); sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    list.forEach(function(d, i){
+      var o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || (label + ' ' + (i + 1));
+      sel.appendChild(o);
+    });
+    if (prev && list.some(function(d){ return d.deviceId === prev; })) sel.value = prev;
+  }
+
+  function listDevices(){
+    if (!navigator.mediaDevices.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then(function(devs){
+      fillSelect($('#camSel'), devs.filter(function(d){ return d.kind === 'videoinput'; }), 'Câmera');
+      fillSelect($('#micSel'), devs.filter(function(d){ return d.kind === 'audioinput'; }), 'Microfone');
+    }).catch(function(){});
+  }
+
+  // Troca de câmera/mic sem sair da sala: refaz a captura com o dispositivo
+  // escolhido e reencaminha as trilhas novas pras conexões já abertas.
+  function reacquire(camId, micId){
+    var wasMicOn = state.micOn, wasCamOn = state.camOn;
+    var constraints = {
+      video: Object.assign({ width:{ideal:1280}, height:{ideal:720} }, camId ? { deviceId:{exact:camId} } : {}),
+      audio: Object.assign({ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, micId ? { deviceId:{exact:micId} } : {})
+    };
+    return navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+      if (state.cam) state.cam.getTracks().forEach(function(t){ t.stop(); });
+      if (state.ctx) try{ state.ctx.close(); }catch(e){}
+      state.cam = stream;
+      var v = stream.getVideoTracks()[0];
+      if (v && 'contentHint' in v) v.contentHint = 'motion';
+      if (v) v.enabled = wasCamOn;
+      state.camOn = !!v && wasCamOn;
+      buildMixer();
+      state.cam.getAudioTracks().forEach(function(t){ t.enabled = wasMicOn; });
+      if (state.micGain) state.micGain.gain.value = wasMicOn ? 1 : 0;
+      if (state.sharing && state.screen){
+        var sat = state.screen.getAudioTracks()[0];
+        if (sat) addScreenAudio(sat);
+      }
+
+      var pv = $('#preview');
+      if (v){ pv.srcObject = stream; pv.classList.remove('gone'); $('#previewOff').classList.add('gone'); pv.style.opacity = wasCamOn ? 1 : 0; }
+
+      if (!state.sharing) swapVideo(v || blackTrack());
+      state.peers.forEach(function(p){
+        var pc = p.call && p.call.peerConnection;
+        if (!pc) return;
+        var s = pc.getSenders().filter(function(s){ return s.track && s.track.kind === 'audio'; })[0];
+        if (s && state.outAudio) s.replaceTrack(state.outAudio).catch(function(){});
+      });
+      syncButtons();
+      listDevices();
+    });
+  }
+
   function outgoing(){
     var s = new MediaStream();
     if (state.outAudio) s.addTrack(state.outAudio);
@@ -372,10 +500,29 @@
     return tiers[tiers.length-1];
   }
 
+  // Chrome/Edge guardam um "colchão" extra no buffer de recepção pra
+  // absorver rede ruim. Isso custa uns 100-200ms de atraso perceptível
+  // em áudio e vídeo. Zerando o hint, o navegador ainda reajusta sozinho
+  // se a rede piorar, mas por padrão entrega o quadro assim que chega.
+  function reduceLatency(pc){
+    if (!pc || !pc.getReceivers) return;
+    pc.getReceivers().forEach(function(r){
+      try{
+        if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
+        if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0;
+      }catch(e){}
+    });
+  }
+
+  function audioBpsFor(n, sharing){
+    if (sharing) return n<=2 ? 160000 : n<=4 ? 128000 : n<=6 ? 96000 : 64000;
+    return n<=4 ? 48000 : 32000;
+  }
+
   function applyLimits(){
     var n = Math.max(1, state.peers.size);
-    var t = pick(state.sharing ? TIERS_SCREEN : TIERS_CAM, n);
-    var audioBps = state.sharing ? 80000 : 32000;   // som de tela precisa de mais
+    var t = state.sharing ? pick(SCREEN_MODES[state.screenMode].tiers, n) : pick(TIERS_CAM, n);
+    var audioBps = audioBpsFor(n, state.sharing);   // tela costuma levar música/vídeo junto, precisa de mais
 
     state.peers.forEach(function(p){
       var pc = p.call && p.call.peerConnection;
@@ -388,11 +535,17 @@
           prm.encodings[0].maxBitrate = t.bps;
           prm.encodings[0].maxFramerate = t.fps;
           prm.encodings[0].scaleResolutionDownBy = t.scale;
+          if (state.sharing){
+            prm.encodings[0].priority = 'high';
+            prm.encodings[0].networkPriority = 'high';
+          }
         } else {
           prm.encodings[0].maxBitrate = audioBps;
+          if (state.sharing) prm.encodings[0].priority = 'high';
         }
         s.setParameters(prm).catch(function(){ /* Firefox ignora parte disso */ });
       });
+      reduceLatency(pc);
     });
 
     var total = state.peers.size + 1;
@@ -439,8 +592,41 @@
       '<video autoplay playsinline' + (isSelf ? ' muted' : '') + '></video>' +
       '<span class="tag on"><i class="dot"></i><em class="who"></em></span>';
     el.querySelector('.who').textContent = label + (isSelf ? ' (você)' : '');
-    $('#grid').appendChild(el);
+    if (state.spotlightId && state.spotlightId !== id) stripEl().appendChild(el);
+    else $('#grid').appendChild(el);
     return el;
+  }
+
+  // Quando alguém compartilha a tela, esse vídeo vira o foco grande e o
+  // resto encolhe numa tira — como Meet/Zoom fazem, em vez de deixar tudo
+  // do mesmo tamanho no grid (o que deixa a tela compartilhada minúscula).
+  function stripEl(){
+    var strip = document.getElementById('strip');
+    if (!strip){ strip = document.createElement('div'); strip.id = 'strip'; strip.className = 'strip'; }
+    return strip;
+  }
+
+  function setSpotlight(id){
+    state.spotlightId = id;
+    var grid = $('#grid'), strip = stripEl();
+    grid.classList.add('spotlight');
+    if (!strip.parentNode) grid.appendChild(strip);
+    Array.prototype.slice.call(grid.children).forEach(function(el){
+      if (el === strip) return;
+      if (el.id === 'tile-' + id){ el.classList.add('spot'); grid.insertBefore(el, grid.firstChild); }
+      else { el.classList.remove('spot'); strip.appendChild(el); }
+    });
+  }
+
+  function clearSpotlight(){
+    state.spotlightId = null;
+    var grid = $('#grid'), strip = document.getElementById('strip');
+    grid.classList.remove('spotlight');
+    if (strip){
+      while (strip.firstChild) grid.appendChild(strip.firstChild);
+      strip.remove();
+    }
+    Array.prototype.slice.call(grid.querySelectorAll('.tile.spot')).forEach(function(el){ el.classList.remove('spot'); });
   }
 
   function updateCount(){
@@ -460,6 +646,7 @@
     p.innerHTML = html;
     log.appendChild(p);
     log.scrollTop = log.scrollHeight;
+    if (!sys && $('#chat').classList.contains('hidden')) $('#btnChat').classList.add('unread');
   }
   function esc(t){
     return String(t).replace(/[&<>"]/g, function(c){
@@ -514,6 +701,11 @@
       } else if (d.t === 'mic'){
         var tg = document.querySelector('#tile-' + conn.peer + ' .tag');
         if (tg) tg.classList.toggle('on', !!d.on);
+      } else if (d.t === 'share'){
+        var stile = document.getElementById('tile-' + conn.peer);
+        if (stile) stile.querySelector('video').classList.toggle('contain', !!d.on);
+        if (d.on) setSpotlight(conn.peer);
+        else if (state.spotlightId === conn.peer) clearSpotlight();
       } else if (d.t === 'full'){
         bail('Sala cheia: o limite é ' + MAX + ' pessoas.');
       }
@@ -550,6 +742,7 @@
     var p = state.peers.get(id);
     if (!p) return;
     state.peers.delete(id);
+    if (state.spotlightId === id) clearSpotlight();
     var tile = document.getElementById('tile-' + id);
     if (tile) tile.remove();
     say(esc(p.name) + ' saiu.', true);
@@ -559,6 +752,8 @@
   function bail(msg){
     if (state.peer){ state.peer.destroy(); state.peer = null; }
     state.peers.clear();
+    state.spotlightId = null;
+    $('#grid').classList.remove('spotlight');
     $('#grid').innerHTML = '';
     $('#call').classList.add('gone');
     $('#lobby').classList.remove('gone');
@@ -596,6 +791,12 @@
       call.answer(outgoing());
       wireCall(call);
     });
+    // Um soluço de rede derruba a sinalização (não a chamada em si). Tenta
+    // se reconectar sozinho em vez de já jogar todo mundo pra fora.
+    state.peer.on('disconnected', function(){
+      say('Conexão com o servidor de sinalização caiu, reconectando...', true);
+      if (!state.peer.destroyed) state.peer.reconnect();
+    });
     state.peer.on('error', function(e){
       if (e.type === 'peer-unavailable')      bail('Essa sala não existe ou quem criou já saiu. Confere o código.');
       else if (e.type === 'unavailable-id')   bail('Esse código já está em uso. Cria outra sala.');
@@ -616,6 +817,16 @@
     syncButtons();
     updateCount();
     if (history.replaceState) history.replaceState(null, '', '#' + room);
+
+    if (state.isHost){
+      var url = location.origin + location.pathname + '#' + room;
+      var link = '<a href="' + esc(url) + '" style="color:inherit">' + esc(url) + '</a>';
+      navigator.clipboard.writeText(url).then(function(){
+        say('Link copiado pra área de transferência: ' + link, true);
+      }).catch(function(){
+        say('Manda esse link pra galera: ' + link, true);
+      });
+    }
   }
 
   function fail(msg){ $('#err').textContent = msg; }
@@ -663,6 +874,8 @@
       tile.classList.remove('sharing');
       tile.querySelector('video').classList.remove('contain');
     }
+    broadcast({ t:'share', on:false });
+    if (state.spotlightId === 'self') clearSpotlight();
     syncButtons();
   }
 
@@ -672,14 +885,14 @@
       return say('Este navegador não compartilha tela. Chrome ou Edge no desktop resolvem.', true);
     }
     navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate:{ ideal:15 } },
-      audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+      video: { width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:60, max:60 } },
+      audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:2, sampleRate:48000 }
     }).then(function(stream){
       state.screen = stream;
       state.sharing = true;
 
       var vt = stream.getVideoTracks()[0];
-      if ('contentHint' in vt) vt.contentHint = 'detail';   // prioriza nitidez sobre fluidez
+      if ('contentHint' in vt) vt.contentHint = SCREEN_MODES[state.screenMode].hint;
       vt.onended = stopShare;
 
       var at = stream.getAudioTracks()[0];
@@ -692,6 +905,8 @@
         tile.classList.add('sharing');
         tile.querySelector('video').classList.add('contain');
       }
+      broadcast({ t:'share', on:true });
+      setSpotlight('self');
       syncButtons();
     }).catch(function(){ /* cancelou o seletor */ });
   }
@@ -719,8 +934,46 @@
   $('#btnMic').addEventListener('click', toggleMic);
   $('#btnCam').addEventListener('click', toggleCam);
   $('#btnScreen').addEventListener('click', share);
+  $('#screenQ').addEventListener('change', function(){
+    state.screenMode = $('#screenQ').value;
+    localStorage.setItem('sala_screenq', state.screenMode);
+    if (state.sharing){
+      if (state.videoTrack && 'contentHint' in state.videoTrack){
+        state.videoTrack.contentHint = SCREEN_MODES[state.screenMode].hint;
+      }
+      applyLimits();
+    }
+  });
   $('#btnLeave').addEventListener('click', leave);
-  $('#btnChat').addEventListener('click', function(){ $('#chat').classList.toggle('hidden'); });
+  $('#btnChat').addEventListener('click', function(){
+    $('#chat').classList.toggle('hidden');
+    if (!$('#chat').classList.contains('hidden')) $('#btnChat').classList.remove('unread');
+  });
+
+  function onDeviceChange(){
+    var camId = $('#camSel').value, micId = $('#micSel').value;
+    reacquire(camId, micId).catch(function(e){ fail(e.message || 'Não deu pra trocar o dispositivo.'); });
+  }
+  $('#camSel').addEventListener('change', onDeviceChange);
+  $('#micSel').addEventListener('change', onDeviceChange);
+  if (navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', listDevices);
+
+  var savedName = localStorage.getItem('sala_name');
+  if (savedName) $('#name').value = savedName;
+  $('#name').addEventListener('input', function(){ localStorage.setItem('sala_name', $('#name').value); });
+
+  var savedQ = localStorage.getItem('sala_screenq');
+  if (savedQ && SCREEN_MODES[savedQ]) state.screenMode = savedQ;
+  $('#screenQ').value = state.screenMode;
+
+  document.addEventListener('keydown', function(e){
+    if ($('#call').classList.contains('gone') || e.repeat) return;
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'm' || e.key === 'M') toggleMic();
+    else if (e.key === 'c' || e.key === 'C') toggleCam();
+    else if (e.key === 's' || e.key === 'S') share();
+  });
 
   $('#copyLink').addEventListener('click', function(){
     var url = location.origin + location.pathname + '#' + state.room;
@@ -749,6 +1002,7 @@
     if (stream.getVideoTracks().length) pv.srcObject = stream;
     else { pv.classList.add('gone'); $('#previewOff').classList.remove('gone'); }
     syncButtons();
+    listDevices();
     var hash = location.hash.slice(1);
     if (hash) $('#code').value = hash;
   }).catch(function(e){
